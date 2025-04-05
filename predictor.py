@@ -14,7 +14,7 @@ robjects.r['options'](warn=-1)
 
 # 加载R模型
 @st.cache_resource
- robjects.r('library(caret)')
+robjects.r('library(caret)')
 def load_r_model():
     r_model = robjects.r['readRDS']('knn_model.rds')
     
