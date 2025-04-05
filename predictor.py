@@ -11,7 +11,7 @@ from rpy2.robjects.conversion import localconverter
 # 初始化R环境
 pandas2ri.activate()
 robjects.r['options'](warn=-1)
-robjects.r('library(caret)')
+
 # 加载R模型
 @st.cache_resource
 def load_r_model():
