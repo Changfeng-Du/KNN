@@ -103,62 +103,62 @@ input_df = pd.DataFrame([input_data])
 # 这里为 DataFrame 设置正确的列名
 input_df.columns = feature_names
     
-    # 进行预测
-    try:
-        prob_1, predicted_class = predict_from_probabilities(input_data, test_probe)
+# 进行预测
+try:
+    prob_1, predicted_class = predict_from_probabilities(input_data, test_probe)
 
-        # 显示结果
-        st.success("### Prediction Results")
-        st.metric("Comorbidity Risk", f"{prob_1*100:.1f}%", 
-                help="Probability of having both conditions")
-        
-        # 生成建议
-        advice_template = """
-        **Recommendations:**
-        - Regular cardiovascular screening
-        - Monitor blood pressure weekly
-        - Mediterranean diet recommended
-        {}"""
-        st.info(advice_template.format("Immediate consultation needed!" if predicted_class==1 else "Maintain healthy lifestyle"))
+    # 显示结果
+    st.success("### Prediction Results")
+    st.metric("Comorbidity Risk", f"{prob_1*100:.1f}%", 
+            help="Probability of having both conditions")
+    
+    # 生成建议
+    advice_template = """
+    **Recommendations:**
+    - Regular cardiovascular screening
+    - Monitor blood pressure weekly
+    - Mediterranean diet recommended
+    {}"""
+    st.info(advice_template.format("Immediate consultation needed!" if predicted_class==1 else "Maintain healthy lifestyle"))
 
-        # SHAP解释
-        st.subheader("Model Interpretation")
-        
-        # 准备解释数据
-        background = shap.sample(test_probe[feature_names], 100)
-        
-        # 定义SHAP预测函数
-        def shap_predict(data):
-            input_df = pd.DataFrame(data, columns=feature_names)
-            return np.column_stack([1-predict_from_probabilities(input_df, test_probe)[0], 
-                                    predict_from_probabilities(input_df, test_probe)[0]])
-        
-        # 创建解释器
-        explainer = shap.KernelExplainer(shap_predict, background)
-        shap_values = explainer.shap_values(input_data, nsamples=100)
-        
-        # 可视化
-        st.subheader("Feature Impact")
-        fig, ax = plt.subplots()
-        shap.force_plot(explainer.expected_value[1], 
-                       shap_values[0][:,1], 
-                       input_data,
-                       matplotlib=True,
-                       show=False)
-        st.pyplot(fig)
+    # SHAP解释
+    st.subheader("Model Interpretation")
+    
+    # 准备解释数据
+    background = shap.sample(test_probe[feature_names], 100)
+    
+    # 定义SHAP预测函数
+    def shap_predict(data):
+        input_df = pd.DataFrame(data, columns=feature_names)
+        return np.column_stack([1-predict_from_probabilities(input_df, test_probe)[0], 
+                                predict_from_probabilities(input_df, test_probe)[0]])
+    
+    # 创建解释器
+    explainer = shap.KernelExplainer(shap_predict, background)
+    shap_values = explainer.shap_values(input_data, nsamples=100)
+    
+    # 可视化
+    st.subheader("Feature Impact")
+    fig, ax = plt.subplots()
+    shap.force_plot(explainer.expected_value[1], 
+                   shap_values[0][:,1], 
+                   input_data,
+                   matplotlib=True,
+                   show=False)
+    st.pyplot(fig)
 
-        # LIME解释
-        lime_exp = LimeTabularExplainer(
-            background.values,
-            feature_names=feature_names,
-            class_names=['Low Risk','High Risk'],
-            mode='classification'
-        ).explain_instance(input_data, 
-                           lambda x: np.column_stack([1-predict_from_probabilities(pd.DataFrame(x, columns=feature_names), test_probe)[0], 
-                                                      predict_from_probabilities(pd.DataFrame(x, columns=feature_names), test_probe)[0]]))
-        
-        st.components.v1.html(lime_exp.as_html(), height=800)
+    # LIME解释
+    lime_exp = LimeTabularExplainer(
+        background.values,
+        feature_names=feature_names,
+        class_names=['Low Risk','High Risk'],
+        mode='classification'
+    ).explain_instance(input_data, 
+                       lambda x: np.column_stack([1-predict_from_probabilities(pd.DataFrame(x, columns=feature_names), test_probe)[0], 
+                                                  predict_from_probabilities(pd.DataFrame(x, columns=feature_names), test_probe)[0]]))
+    
+    st.components.v1.html(lime_exp.as_html(), height=800)
 
-    except Exception as e:
-        st.error(f"Prediction Error: {str(e)}")
-        st.stop()
+except Exception as e:
+    st.error(f"Prediction Error: {str(e)}")
+    st.stop()
