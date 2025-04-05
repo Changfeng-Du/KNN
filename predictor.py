@@ -7,7 +7,6 @@ from lime.lime_tabular import LimeTabularExplainer
 import rpy2.robjects as robjects
 from rpy2.robjects import pandas2ri
 from rpy2.robjects.conversion import localconverter
-from sklearn.metrics import roc_curve, auc
 
 # 初始化R环境
 pandas2ri.activate()
@@ -15,14 +14,42 @@ robjects.r['options'](warn=-1)
 
 # 分类变量映射
 CATEGORICAL_MAP = {
-    'smoker': [1, 2, 3],
-    'sex': [1, 2],
-    'carace': [1, 2, 3, 4, 5],
-    'drink': [1, 2],
-    'sleep': [1, 2],
-    'Hypertension': [1, 2],
-    'Dyslipidemia': [1, 2]
+    'smoker': {
+        'values': [1, 2, 3],
+        'labels': ["Never", "Former", "Current"]
+    },
+    'sex': {
+        'values': [1, 2],
+        'labels': ["Female", "Male"]
+    },
+    'carace': {
+        'values': [1, 2, 3, 4, 5],
+        'labels': ["Mexican", "Hispanic", "White", "Black", "Other"]
+    },
+    'drink': {
+        'values': [1, 2],
+        'labels': ["No", "Yes"]
+    },
+    'sleep': {
+        'values': [1, 2],
+        'labels': ["Problem", "Normal"]
+    },
+    'Hypertension': {
+        'values': [1, 2],
+        'labels': ["No", "Yes"]
+    },
+    'Dyslipidemia': {
+        'values': [1, 2],
+        'labels': ["No", "Yes"]
+    }
 }
+
+# 特征顺序
+feature_names = [
+    'smoker', 'sex', 'carace', 'drink', 'sleep',
+    'Hypertension', 'Dyslipidemia', 'HHR', 'RIDAGEYR',
+    'INDFMPIR', 'BMXBMI', 'LBXWBCSI', 'LBXRBCSI'
+]
 
 # 加载资源和数据
 @st.cache_resource
@@ -45,23 +72,17 @@ def load_data():
 r_model = load_resources()
 dev, vad = load_data()
 
-# 特征顺序
-feature_names = [
-    'smoker', 'sex', 'carace', 'drink', 'sleep',
-    'Hypertension', 'Dyslipidemia', 'HHR', 'RIDAGEYR',
-    'INDFMPIR', 'BMXBMI', 'LBXWBCSI', 'LBXRBCSI'
-]
-
 # 数据转换函数
 def convert_to_r_factors(input_df):
-    """将分类变量转换为R因子"""
+    """将分类变量转换为R因子，保留原始数值类型"""
     r_data = {}
     for col in input_df.columns:
         if col in CATEGORICAL_MAP:
+            # 转换为字符串类型因子
+            factor_levels = [str(x) for x in CATEGORICAL_MAP[col]['values']]
             r_data[col] = robjects.FactorVector(
-                input_df[col],
-                levels=robjects.IntVector(CATEGORICAL_MAP[col])
-            )
+                input_df[col].astype(str),  # 转换为字符串
+                levels=robjects.StrVector(factor_levels)
         else:
             r_data[col] = input_df[col].values
     return robjects.DataFrame(r_data)
@@ -69,13 +90,35 @@ def convert_to_r_factors(input_df):
 # 预测函数
 def r_predict(input_df):
     try:
+        # 类型强制转换
+        type_map = {
+            col: 'int64' if col in CATEGORICAL_MAP else 'float64'
+            for col in feature_names
+        }
+        input_df = input_df.astype(type_map)
+        
+        # R数据转换
         with localconverter(robjects.default_converter + pandas2ri.converter):
             r_data = convert_to_r_factors(input_df)
-            r_pred = robjects.r['predict'](r_model, newdata=r_data, type="prob")
-            pred_df = robjects.conversion.rpy2py(r_pred)
-        return pred_df['Yes'].values
+            r_pred = robjects.r['predict'](
+                r_model, 
+                newdata=r_data,
+                type="prob"
+            )
+            with localconverter(robjects.default_converter + pandas2ri.converter):
+                pred_df = robjects.conversion.rpy2py(r_pred)
+        
+        # 确保返回概率值
+        if isinstance(pred_df, pd.DataFrame):
+            return pred_df['Yes'].values
+        elif isinstance(pred_df, np.ndarray):
+            return pred_df[:, 1] if pred_df.shape[1] > 1 else pred_df.flatten()
+        else:
+            raise ValueError("Unexpected prediction output format")
+            
     except Exception as e:
-        raise RuntimeError(f"Prediction failed: {str(e)}")
+        st.error(f"Prediction Error Details:\n{str(e)}")
+        raise RuntimeError("Prediction failed due to data processing error")
 
 # Streamlit界面
 st.title("Co-occurrence Risk Predictor (R Model)")
@@ -85,22 +128,29 @@ with st.form("input_form"):
     col1, col2 = st.columns(2)
     
     with col1:
-        smoker = st.selectbox("Smoker:", CATEGORICAL_MAP['smoker'], 
-                            format_func=lambda x: ["Never", "Former", "Current"][x-1])
-        sex = st.selectbox("Sex:", CATEGORICAL_MAP['sex'], 
-                         format_func=lambda x: ["Female", "Male"][x-1])
-        carace = st.selectbox("Race:", CATEGORICAL_MAP['carace'],
-                            format_func=lambda x: ["Mexican","Hispanic","White","Black","Other"][x-1])
-        drink = st.selectbox("Alcohol:", CATEGORICAL_MAP['drink'],
-                           format_func=lambda x: ["No", "Yes"][x-1])
-        sleep = st.selectbox("Sleep:", CATEGORICAL_MAP['sleep'],
-                           format_func=lambda x: ["Problem", "Normal"][x-1])
+        smoker = st.selectbox("Smoker:", 
+                            CATEGORICAL_MAP['smoker']['values'],
+                            format_func=lambda x: CATEGORICAL_MAP['smoker']['labels'][x-1])
+        sex = st.selectbox("Sex:", 
+                         CATEGORICAL_MAP['sex']['values'],
+                         format_func=lambda x: CATEGORICAL_MAP['sex']['labels'][x-1])
+        carace = st.selectbox("Race:",
+                            CATEGORICAL_MAP['carace']['values'],
+                            format_func=lambda x: CATEGORICAL_MAP['carace']['labels'][x-1])
+        drink = st.selectbox("Alcohol:",
+                           CATEGORICAL_MAP['drink']['values'],
+                           format_func=lambda x: CATEGORICAL_MAP['drink']['labels'][x-1])
+        sleep = st.selectbox("Sleep:",
+                           CATEGORICAL_MAP['sleep']['values'],
+                           format_func=lambda x: CATEGORICAL_MAP['sleep']['labels'][x-1])
         
     with col2:
-        Hypertension = st.selectbox("Hypertension:", CATEGORICAL_MAP['Hypertension'],
-                                  format_func=lambda x: ["No", "Yes"][x-1])
-        Dyslipidemia = st.selectbox("Dyslipidemia:", CATEGORICAL_MAP['Dyslipidemia'],
-                                  format_func=lambda x: ["No", "Yes"][x-1])
+        Hypertension = st.selectbox("Hypertension:",
+                                  CATEGORICAL_MAP['Hypertension']['values'],
+                                  format_func=lambda x: CATEGORICAL_MAP['Hypertension']['labels'][x-1])
+        Dyslipidemia = st.selectbox("Dyslipidemia:",
+                                  CATEGORICAL_MAP['Dyslipidemia']['values'],
+                                  format_func=lambda x: CATEGORICAL_MAP['Dyslipidemia']['labels'][x-1])
         HHR = st.number_input("HHR Ratio:", min_value=0.2, max_value=1.7, value=1.0)
         RIDAGEYR = st.number_input("Age:", min_value=20, max_value=80, value=50)
         INDFMPIR = st.number_input("Poverty Ratio:", min_value=0.0, max_value=5.0, value=2.0)
@@ -113,10 +163,11 @@ with st.form("input_form"):
 if submitted:
     # 构建输入数据
     input_data = [
-        smoker, sex, carace, drink, sleep,
-        Hypertension, Dyslipidemia, HHR, RIDAGEYR,
-        INDFMPIR, BMXBMI, LBXWBCSI, LBXRBCSI
+        int(smoker), int(sex), int(carace), int(drink), int(sleep),
+        int(Hypertension), int(Dyslipidemia), float(HHR), int(RIDAGEYR),
+        float(INDFMPIR), float(BMXBMI), float(LBXWBCSI), float(LBXRBCSI)
     ]
+    
     input_df = pd.DataFrame([input_data], columns=feature_names)
     
     try:
@@ -133,14 +184,27 @@ if submitted:
             st.metric("Recommended Action", 
                       "Immediate Intervention" if predicted_class else "Routine Monitoring")
 
+        # 生成建议
+        advice = """
+        **Clinical Recommendations:**
+        - Monthly cardiovascular screening
+        - Daily blood pressure monitoring
+        - Mediterranean diet plan
+        - 150 mins/week moderate exercise
+        {}"""
+        st.info(advice.format("**▲ High Risk: Consult specialist immediately**" 
+                            if predicted_class else "**▼ Low Risk: Maintain current lifestyle**"))
+
         # SHAP解释
         st.subheader("SHAP Feature Impact")
         with st.spinner('Generating explanation...'):
             background = shap.sample(vad[feature_names], 100)
             
             def shap_predict(data):
-                return np.column_stack([1 - r_predict(pd.DataFrame(data, columns=feature_names)),
-                                      r_predict(pd.DataFrame(data, columns=feature_names))])
+                return np.column_stack([
+                    1 - r_predict(pd.DataFrame(data, columns=feature_names)),
+                    r_predict(pd.DataFrame(data, columns=feature_names))
+                ])
 
             explainer = shap.KernelExplainer(shap_predict, background)
             shap_values = explainer.shap_values(input_df, nsamples=50)
@@ -153,8 +217,10 @@ if submitted:
         st.subheader("LIME Explanation")
         with st.spinner('Analyzing local features...'):
             def lime_predict(x):
-                return np.column_stack([1 - r_predict(pd.DataFrame(x, columns=feature_names)),
-                                      r_predict(pd.DataFrame(x, columns=feature_names))])
+                return np.column_stack([
+                    1 - r_predict(pd.DataFrame(x, columns=feature_names)),
+                    r_predict(pd.DataFrame(x, columns=feature_names))
+                ])
 
             lime_explainer = LimeTabularExplainer(
                 dev[feature_names].values,
@@ -172,5 +238,5 @@ if submitted:
             st.components.v1.html(exp.as_html(), height=800)
 
     except Exception as e:
-        st.error(f"Prediction Error: {str(e)}")
+        st.error(f"System Error: {str(e)}")
         st.stop()
