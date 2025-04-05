@@ -6,3 +6,4 @@ matplotlib==3.8.0
 scikit-learn==1.5.1
 lime==0.2.0.1
 shap==0.45.1
+rpy2==3.5.1
