@@ -88,7 +88,10 @@ def predict_from_probabilities(input_data, probability_data):
     # 确保列名匹配
     input_df = pd.DataFrame([input_data], columns=feature_names)
     
-    # 通过列名匹配来获取概率
+    # 打印输入数据和概率数据的列名，帮助调试
+    st.write("Input Data Columns: ", input_df.columns)
+    st.write("Probability Data Columns: ", probability_data.columns)
+
     if set(input_df.columns).issubset(probability_data.columns):
         pred_data = probability_data[['No', 'Yes']]
         # 使用输入数据的索引来查找对应的预测概率
