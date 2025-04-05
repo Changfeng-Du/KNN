@@ -166,43 +166,7 @@ if st.button("开始预测"):
                    unsafe_allow_html=True)
         
         # --------------------- 模型解释 ---------------------
-        st.subheader("模型解释")
-        
-           # SHAP解释
-        with st.spinner('生成SHAP解释...'):
-            explainer = shap.KernelExplainer(
-                lambda x: np.array([
-                    robjects.globalenv['safe_predict'](
-                        r_model, 
-                        robjects.conversion.py2rpy(
-                            pd.DataFrame(x, columns=input_df.columns)
-                        )
-                    ]),  # 补齐所有括号
-                shap.sample(vad[input_df.columns], 100)
-            )
-            shap_values = explainer.shap_values(input_df)
-            
-            fig, ax = plt.subplots()
-            shap.force_plot(explainer.expected_value, 
-                           shap_values[0], 
-                           input_df.iloc[0],
-                           matplotlib=True, show=False)
-            st.pyplot(fig)
-        
-        # LIME解释
-        with st.spinner('生成LIME解释...'):
-            lime_exp = LimeTabularExplainer(
-                dev[input_df.columns].values,
-                feature_names=input_df.columns,
-                class_names=['低风险', '高风险'],
-                mode='classification'
-            ).explain_instance(
-                input_df.values[0], 
-                lambda x: np.array([robjects.globalenv['safe_predict'](r_model, 
-                                  robjects.conversion.py2rpy(pd.DataFrame(x, columns=input_df.columns))])
-            
-            st.components.v1.html(lime_exp.as_html(), height=800)
-        
+ 
         # --------------------- 性能可视化 ---------------------
         st.subheader("模型性能")
         
