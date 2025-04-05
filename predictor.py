@@ -39,6 +39,11 @@ dev, vad = load_data()
 def load_pred_probabilities():
     train_probe = pd.read_csv('train_probe.csv')
     test_probe = pd.read_csv('test_probe.csv')
+    
+    # 强制确保列名正确
+    train_probe.columns = train_probe.columns.str.strip()
+    test_probe.columns = test_probe.columns.str.strip()
+    
     return train_probe, test_probe
 
 train_probe, test_probe = load_pred_probabilities()
@@ -80,17 +85,22 @@ with st.form("input_form"):
 
 # 预测函数 (基于概率文件)
 def predict_from_probabilities(input_data, probability_data):
-    # 由于输入数据和概率数据没有直接对应的关系，需要根据输入值与预测数据找到对应的概率
-    # 假设你是通过一个最近邻匹配方法来找到最接近的记录
-    pred_data = probability_data[['No', 'Yes']]
-    # 使用输入数据的索引来查找对应的预测概率
-    idx = probability_data[probability_data[feature_names].eq(input_data).all(axis=1)].index[0]
+    # 确保列名匹配
+    input_df = pd.DataFrame([input_data], columns=feature_names)
     
-    prob_1 = pred_data.loc[idx, 'Yes']
-    prob_0 = 1 - prob_1
-    predicted_class = 1 if prob_1 > 0.56 else 0
-    
-    return prob_1, predicted_class
+    # 通过列名匹配来获取概率
+    if set(input_df.columns).issubset(probability_data.columns):
+        pred_data = probability_data[['No', 'Yes']]
+        # 使用输入数据的索引来查找对应的预测概率
+        idx = probability_data[probability_data[feature_names].eq(input_data).all(axis=1)].index[0]
+        
+        prob_1 = pred_data.loc[idx, 'Yes']
+        prob_0 = 1 - prob_1
+        predicted_class = 1 if prob_1 > 0.56 else 0
+        
+        return prob_1, predicted_class
+    else:
+        raise ValueError(f"Feature columns in input data do not match with probability data columns.")
 
 if submitted:
     # 构建输入数据
