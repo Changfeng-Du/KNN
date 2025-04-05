@@ -9,7 +9,7 @@ from lime.lime_tabular import LimeTabularExplainer
 # 加载PKL模型
 @st.cache_resource
 def load_model():
-    return joblib.load('knn_model.pkl')
+    return joblib.load('r_model.pkl')
 
 model = load_model()
 
