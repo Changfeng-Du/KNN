@@ -72,53 +72,59 @@ def load_data():
 r_model = load_resources()
 dev, vad = load_data()
 
-# 数据转换函数
+# 数据转换函数（关键修复）
 def convert_to_r_factors(input_df):
-    """将分类变量转换为R因子，保留原始数值类型"""
+    """将数据转换为R兼容格式"""
     r_data = {}
     for col in input_df.columns:
+        # 处理分类变量
         if col in CATEGORICAL_MAP:
-            # 转换为字符串类型因子
-            factor_levels = [str(x) for x in CATEGORICAL_MAP[col]['values']]
+            values = input_df[col].astype(int).tolist()
+            levels = robjects.IntVector(CATEGORICAL_MAP[col]['values'])
             r_data[col] = robjects.FactorVector(
-                input_df[col].astype(str),  # 转换为字符串
-                levels=robjects.StrVector(factor_levels))
+                robjects.IntVector(values),
+                levels=levels
+            )
+        # 处理数值变量
         else:
-            r_data[col] = input_df[col].values
+            values = input_df[col].astype(float).tolist()
+            r_data[col] = robjects.FloatVector(values)
     return robjects.DataFrame(r_data)
 
-# 预测函数
+# 预测函数（关键修复）
 def r_predict(input_df):
     try:
-        # 类型强制转换
-        type_map = {
+        # 执行类型转换
+        input_df = input_df.astype({
             col: 'int64' if col in CATEGORICAL_MAP else 'float64'
-            for col in feature_names
-        }
-        input_df = input_df.astype(type_map)
+        })
         
-        # R数据转换
+        # 转换为R数据格式
         with localconverter(robjects.default_converter + pandas2ri.converter):
             r_data = convert_to_r_factors(input_df)
+            
+            # 调试输出R数据结构
+            st.write("R数据结构摘要：")
+            st.code(robjects.r['capture.output'](robjects.r['str'](r_data)))
+            
+            # 执行预测
             r_pred = robjects.r['predict'](
                 r_model, 
                 newdata=r_data,
                 type="prob"
             )
-            with localconverter(robjects.default_converter + pandas2ri.converter):
-                pred_df = robjects.conversion.rpy2py(r_pred)
-        
-        # 确保返回概率值
-        if isinstance(pred_df, pd.DataFrame):
-            return pred_df['Yes'].values
-        elif isinstance(pred_df, np.ndarray):
-            return pred_df[:, 1] if pred_df.shape[1] > 1 else pred_df.flatten()
-        else:
-            raise ValueError("Unexpected prediction output format")
             
+            # 转换预测结果
+            pred_df = pd.DataFrame(
+                np.array(r_pred),
+                columns=['No', 'Yes']
+            )
+            
+        return pred_df['Yes'].values
+    
     except Exception as e:
-        st.error(f"Prediction Error Details:\n{str(e)}")
-        raise RuntimeError("Prediction failed due to data processing error")
+        st.error(f"预测过程详细错误：\n{str(e)}")
+        raise RuntimeError("预测失败")
 
 # Streamlit界面
 st.title("Co-occurrence Risk Predictor (R Model)")
@@ -151,22 +157,32 @@ with st.form("input_form"):
         Dyslipidemia = st.selectbox("Dyslipidemia:",
                                   CATEGORICAL_MAP['Dyslipidemia']['values'],
                                   format_func=lambda x: CATEGORICAL_MAP['Dyslipidemia']['labels'][x-1])
-        HHR = st.number_input("HHR Ratio:", min_value=0.2, max_value=1.7, value=1.0)
+        HHR = st.number_input("HHR Ratio:", min_value=0.2, max_value=1.7, value=1.0, step=0.1)
         RIDAGEYR = st.number_input("Age:", min_value=20, max_value=80, value=50)
-        INDFMPIR = st.number_input("Poverty Ratio:", min_value=0.0, max_value=5.0, value=2.0)
-        BMXBMI = st.number_input("BMI:", min_value=15.0, max_value=60.0, value=25.0)
-        LBXWBCSI = st.number_input("WBC:", min_value=2.0, max_value=20.0, value=6.0)
-        LBXRBCSI = st.number_input("RBC:", min_value=2.5, max_value=7.0, value=4.0)
+        INDFMPIR = st.number_input("Poverty Ratio:", min_value=0.0, max_value=5.0, value=2.0, step=0.1)
+        BMXBMI = st.number_input("BMI:", min_value=15.0, max_value=60.0, value=25.0, step=0.1)
+        LBXWBCSI = st.number_input("WBC:", min_value=2.0, max_value=20.0, value=6.0, step=0.1)
+        LBXRBCSI = st.number_input("RBC:", min_value=2.5, max_value=7.0, value=4.0, step=0.1)
 
     submitted = st.form_submit_button("Predict")
 
 if submitted:
-    # 构建输入数据
-    input_data = [
-        int(smoker), int(sex), int(carace), int(drink), int(sleep),
-        int(Hypertension), int(Dyslipidemia), float(HHR), int(RIDAGEYR),
-        float(INDFMPIR), float(BMXBMI), float(LBXWBCSI), float(LBXRBCSI)
-    ]
+    # 构建输入数据（带类型强制转换）
+    input_data = {
+        'smoker': int(smoker),
+        'sex': int(sex),
+        'carace': int(carace),
+        'drink': int(drink),
+        'sleep': int(sleep),
+        'Hypertension': int(Hypertension),
+        'Dyslipidemia': int(Dyslipidemia),
+        'HHR': float(HHR),
+        'RIDAGEYR': int(RIDAGEYR),
+        'INDFMPIR': float(INDFMPIR),
+        'BMXBMI': float(BMXBMI),
+        'LBXWBCSI': float(LBXWBCSI),
+        'LBXRBCSI': float(LBXRBCSI)
+    }
     
     input_df = pd.DataFrame([input_data], columns=feature_names)
     
@@ -238,5 +254,5 @@ if submitted:
             st.components.v1.html(exp.as_html(), height=800)
 
     except Exception as e:
-        st.error(f"System Error: {str(e)}")
+        st.error(f"系统错误：{str(e)}")
         st.stop()
