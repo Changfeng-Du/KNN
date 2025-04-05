@@ -116,7 +116,7 @@ def convert_to_r_factors(input_df):
         if col in CATEGORICAL_MAP:
             r_data[col] = robjects.FactorVector(
                 input_df[col],
-                levels=robjects.IntVector(CATEGORICAL_MAP[col])
+                levels=robjects.IntVector(CATEGORICAL_MAP[col]))
         else:
             r_data[col] = input_df[col].values
     return robjects.DataFrame(r_data)
