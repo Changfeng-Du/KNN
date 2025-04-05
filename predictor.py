@@ -1,17 +1,29 @@
 import streamlit as st
-import joblib
 import pandas as pd
 import numpy as np
 import shap
 import matplotlib.pyplot as plt
 from lime.lime_tabular import LimeTabularExplainer
+import rpy2.robjects as robjects
+from rpy2.robjects import pandas2ri
+from rpy2.robjects.conversion import localconverter
 
-# 加载PKL模型
+# 初始化R环境
+pandas2ri.activate()
+robjects.r['options'](warn=-1)
+
+# 加载R模型
 @st.cache_resource
-def load_model():
-    return joblib.load('r_model.pkl')
+def load_r_model():
+    r_model = robjects.r['readRDS']('knn_model.rds')
+    
+    # 动态修补Pandas兼容性
+    if not hasattr(pd.DataFrame, 'iteritems'):
+        pd.DataFrame.iteritems = pd.DataFrame.items
+        
+    return r_model
 
-model = load_model()
+r_model = load_r_model()
 
 # 加载数据
 @st.cache_data
@@ -30,7 +42,7 @@ feature_names = [
 ]
 
 # Streamlit界面
-st.title("Co-occurrence Risk Predictor")
+st.title("Co-occurrence Risk Predictor (R Model)")
 
 # 创建输入表单
 with st.form("input_form"):
@@ -57,6 +69,22 @@ with st.form("input_form"):
 
     submitted = st.form_submit_button("Predict")
 
+# 预测函数
+def r_predict(input_df):
+    with localconverter(robjects.default_converter + pandas2ri.converter):
+        r_data = robjects.conversion.py2rpy(input_df)
+    
+    r_pred = robjects.r['predict'](
+        r_model, 
+        newdata=r_data,
+        type="prob"
+    )
+    
+    with localconverter(robjects.default_converter + pandas2ri.converter):
+        pred_df = robjects.conversion.rpy2py(r_pred)
+    
+    return pred_df['Yes'].values  # 返回阳性类概率
+
 if submitted:
     # 构建输入数据
     input_data = [
@@ -68,9 +96,8 @@ if submitted:
     
     try:
         # 执行预测
-        proba = model.predict_proba(input_df)[0]
-        prob_1 = proba[1]
-        prob_0 = proba[0]
+        prob_1 = r_predict(input_df)[0]
+        prob_0 = 1 - prob_1
         predicted_class = 1 if prob_1 > 0.56 else 0
         
         # 显示结果
@@ -90,16 +117,23 @@ if submitted:
         # SHAP解释
         st.subheader("Model Interpretation")
         
-        # 使用KernelExplainer
+        # 准备解释数据
         background = shap.sample(vad[feature_names], 100)
-        explainer = shap.KernelExplainer(model.predict_proba, background)
+        
+        # 定义SHAP预测函数
+        def shap_predict(data):
+            input_df = pd.DataFrame(data, columns=feature_names)
+            return np.column_stack([1-r_predict(input_df), r_predict(input_df)])
+        
+        # 创建解释器
+        explainer = shap.KernelExplainer(shap_predict, background)
         shap_values = explainer.shap_values(input_df, nsamples=100)
         
         # 可视化
         st.subheader("Feature Impact")
         fig, ax = plt.subplots()
         shap.force_plot(explainer.expected_value[1], 
-                       shap_values[1][0], 
+                       shap_values[0][:,1], 
                        input_df.iloc[0],
                        matplotlib=True,
                        show=False)
@@ -107,13 +141,14 @@ if submitted:
         
         # LIME解释
         lime_exp = LimeTabularExplainer(
-            dev[feature_names].values,
+            background.values,
             feature_names=feature_names,
             class_names=['Low Risk','High Risk'],
             mode='classification'
-        ).explain_instance(input_df.values[0], 
-                          model.predict_proba,
-                          num_features=len(feature_names))
+        ).explain_instance()
+        input_df.values[0], 
+        lambda x: np.column_stack([1-r_predict(pd.DataFrame(x, columns=feature_names)),
+                                      r_predict(pd.DataFrame(x, columns=feature_names))])
         
         st.components.v1.html(lime_exp.as_html(), height=800)
 
