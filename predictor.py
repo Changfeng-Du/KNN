@@ -6,15 +6,15 @@ import shap
 import matplotlib.pyplot as plt
 from lime.lime_tabular import LimeTabularExplainer
 
-# 加载新的模型
+# Load the new model
 @st.cache_resource
 def load_model():
-    model = joblib.load('r_model.pkl')  # 加载 .pkl 模型而不是 .rds
+    model = joblib.load('knn_model.pkl')  # Load the .pkl model instead of .rds
     return model
 
 model = load_model()
 
-# 加载数据
+# Load data
 @st.cache_data
 def load_data():
     dev = pd.read_csv('dev.csv')
@@ -23,49 +23,49 @@ def load_data():
 
 dev, vad = load_data()
 
-# 定义数据集的特征名称
+# Define feature names from the dataset
 feature_names = [
     'smoker', 'sex', 'carace', 'drink', 'sleep',
     'Hypertension', 'Dyslipidemia', 'HHR', 'RIDAGEYR',
     'INDFMPIR', 'BMXBMI', 'LBXWBCSI', 'LBXRBCSI'
 ]
 
-# Streamlit 界面
-st.title("共病风险预测器 (Pkl 模型)")
+# Streamlit interface
+st.title("Co-occurrence Risk Predictor (Pkl Model)")
 
-# 创建输入字段表单
+# Create form for input fields
 with st.form("input_form"):
     col1, col2 = st.columns(2)
     
     with col1:
-        smoker = st.selectbox("吸烟者:", [1, 2, 3], 
-                            format_func=lambda x: "从不" if x==1 else "曾经" if x==2 else "当前")
-        sex = st.selectbox("性别:", [1, 2], format_func=lambda x: "女性" if x==1 else "男性")
-        carace = st.selectbox("种族:", [1, 2, 3, 4, 5], 
-                            format_func=lambda x: ["墨西哥人", "西班牙裔", "白人", "黑人", "其他"][x-1])
-        drink = st.selectbox("饮酒:", [1, 2], format_func=lambda x: "否" if x==1 else "是")
-        sleep = st.selectbox("睡眠:", [1, 2], format_func=lambda x: "问题" if x==1 else "正常")
+        smoker = st.selectbox("Smoker:", [1, 2, 3], 
+                            format_func=lambda x: "Never" if x==1 else "Former" if x==2 else "Current")
+        sex = st.selectbox("Sex:", [1, 2], format_func=lambda x: "Female" if x==1 else "Male")
+        carace = st.selectbox("Race:", [1, 2, 3, 4, 5], 
+                            format_func=lambda x: ["Mexican","Hispanic","White","Black","Other"][x-1])
+        drink = st.selectbox("Alcohol:", [1, 2], format_func=lambda x: "No" if x==1 else "Yes")
+        sleep = st.selectbox("Sleep:", [1, 2], format_func=lambda x: "Problem" if x==1 else "Normal")
         
     with col2:
-        Hypertension = st.selectbox("高血压:", [1, 2], format_func=lambda x: "否" if x==1 else "是")
-        Dyslipidemia = st.selectbox("血脂异常:", [1, 2], format_func=lambda x: "否" if x==1 else "是")
-        HHR = st.number_input("HHR 比率:", min_value=0.2, max_value=1.7, value=1.0)
-        RIDAGEYR = st.number_input("年龄:", min_value=20, max_value=80, value=50)
-        INDFMPIR = st.number_input("贫困比率:", min_value=0.0, max_value=5.0, value=2.0)
+        Hypertension = st.selectbox("Hypertension:", [1, 2], format_func=lambda x: "No" if x==1 else "Yes")
+        Dyslipidemia = st.selectbox("Dyslipidemia:", [1, 2], format_func=lambda x: "No" if x==1 else "Yes")
+        HHR = st.number_input("HHR Ratio:", min_value=0.2, max_value=1.7, value=1.0)
+        RIDAGEYR = st.number_input("Age:", min_value=20, max_value=80, value=50)
+        INDFMPIR = st.number_input("Poverty Ratio:", min_value=0.0, max_value=5.0, value=2.0)
         BMXBMI = st.number_input("BMI:", min_value=15.0, max_value=60.0, value=25.0)
         LBXWBCSI = st.number_input("WBC:", min_value=2.0, max_value=20.0, value=6.0)
         LBXRBCSI = st.number_input("RBC:", min_value=2.5, max_value=7.0, value=4.0)
 
-    submitted = st.form_submit_button("预测")
+    submitted = st.form_submit_button("Predict")
 
-# 使用加载的 .pkl 模型进行预测
+# Prediction function using the loaded .pkl model
 def predict(input_df):
     prediction = model.predict(input_df)
-    prob = model.predict_proba(input_df)[:,1]  # 类别1的概率
+    prob = model.predict_proba(input_df)[:,1]  # Probabilities for class 1
     return prediction, prob
 
 if submitted:
-    # 构建输入数据框
+    # Construct the input dataframe
     input_data = [
         smoker, sex, carace, drink, sleep,
         Hypertension, Dyslipidemia, HHR, RIDAGEYR,
@@ -74,43 +74,43 @@ if submitted:
     input_df = pd.DataFrame([input_data], columns=feature_names)
     
     try:
-        # 获取预测结果和概率
+        # Get the prediction and probabilities
         pred_class, prob = predict(input_df)
         prob_1 = prob[0]
         prob_0 = 1 - prob_1
         predicted_class = 1 if prob_1 > 0.56 else 0
         
-        # 显示预测结果
-        st.success("### 预测结果")
-        st.metric("共病风险", f"{prob_1*100:.1f}%", 
-                  help="患有两种疾病的概率")
+        # Display the prediction result
+        st.success("### Prediction Results")
+        st.metric("Comorbidity Risk", f"{prob_1*100:.1f}%", 
+                  help="Probability of having both conditions")
         
-        # 根据预测结果生成建议
+        # Generate advice based on the prediction
         advice_template = """
-        **建议:**
-        - 定期进行心血管筛查
-        - 每周监测血压
-        - 推荐地中海饮食
+        **Recommendations:**
+        - Regular cardiovascular screening
+        - Monitor blood pressure weekly
+        - Mediterranean diet recommended
         {}"""
-        st.info(advice_template.format("建议立即咨询医生!" if predicted_class == 1 else "保持健康的生活方式"))
+        st.info(advice_template.format("Immediate consultation needed!" if predicted_class == 1 else "Maintain healthy lifestyle"))
 
-        # SHAP 解释
-        st.subheader("模型解释")
+        # SHAP explanation
+        st.subheader("Model Interpretation")
 
-        # 准备 SHAP 背景数据
+        # Prepare background data for SHAP
         background = shap.sample(vad[feature_names], 100)
         
-        # 定义 SHAP 预测函数
+        # Define SHAP prediction function
         def shap_predict(data):
             input_df = pd.DataFrame(data, columns=feature_names)
             return np.column_stack([1-predict(input_df)[1], predict(input_df)[1]])
         
-        # 创建 SHAP 解释器
+        # Create SHAP explainer
         explainer = shap.KernelExplainer(shap_predict, background)
         shap_values = explainer.shap_values(input_df, nsamples=100)
         
-        # 可视化 SHAP 值
-        st.subheader("特征影响")
+        # Visualize SHAP values
+        st.subheader("Feature Impact")
         fig, ax = plt.subplots()
         shap.force_plot(explainer.expected_value[1], 
                        shap_values[0][:,1], 
@@ -119,11 +119,11 @@ if submitted:
                        show=False)
         st.pyplot(fig)
 
-        # LIME 解释
+        # LIME explanation
         lime_exp = LimeTabularExplainer(
             background.values,
             feature_names=feature_names,
-            class_names=['低风险', '高风险'],
+            class_names=['Low Risk', 'High Risk'],
             mode='classification'
         ).explain_instance(input_df.values[0], 
                            lambda x: np.column_stack([1-predict(pd.DataFrame(x, columns=feature_names))[1],
@@ -132,5 +132,5 @@ if submitted:
         st.components.v1.html(lime_exp.as_html(), height=800)
 
     except Exception as e:
-        st.error(f"预测错误: {str(e)}")
+        st.error(f"Prediction error: {str(e)}")
         st.stop()
