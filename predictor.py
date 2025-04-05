@@ -4,35 +4,15 @@ import numpy as np
 import shap
 import matplotlib.pyplot as plt
 from lime.lime_tabular import LimeTabularExplainer
-import rpy2.robjects as robjects
-from rpy2.robjects import pandas2ri
-from rpy2.robjects.conversion import localconverter
 
-# 初始化R环境
-pandas2ri.activate()
-robjects.r['options'](warn=-1)
-
-# 加载R模型
-@st.cache_resource
-def load_r_model():
-    r_model = robjects.r['readRDS']('knn_model.rds')
-    
-    # 动态修补Pandas兼容性
-    if not hasattr(pd.DataFrame, 'iteritems'):
-        pd.DataFrame.iteritems = pd.DataFrame.items
-        
-    return r_model
-
-r_model = load_r_model()
-
-# 加载数据
+# 加载训练集和验证集的预测概率数据
 @st.cache_data
-def load_data():
-    dev = pd.read_csv('dev.csv')
-    vad = pd.read_csv('vad.csv')
-    return dev, vad
+def load_probability_data():
+    train_probs = pd.read_csv('train_probe.csv')  # 假设是训练集的预测概率
+    val_probs = pd.read_csv('test_probe.csv')      # 假设是验证集的预测概率
+    return train_probs, val_probs
 
-dev, vad = load_data()
+train_probs, val_probs = load_probability_data()
 
 # 定义特征顺序（根据实际数据调整）
 feature_names = [
@@ -42,7 +22,7 @@ feature_names = [
 ]
 
 # Streamlit界面
-st.title("Co-occurrence Risk Predictor (R Model)")
+st.title("Co-occurrence Risk Predictor")
 
 # 创建输入表单
 with st.form("input_form"):
@@ -69,21 +49,15 @@ with st.form("input_form"):
 
     submitted = st.form_submit_button("Predict")
 
-# 预测函数
-def r_predict(input_df):
-    with localconverter(robjects.default_converter + pandas2ri.converter):
-        r_data = robjects.conversion.py2rpy(input_df)
-    
-    r_pred = robjects.r['predict'](
-        r_model, 
-        newdata=r_data,
-        type="prob"
-    )
-    
-    with localconverter(robjects.default_converter + pandas2ri.converter):
-        pred_df = robjects.conversion.rpy2py(r_pred)
-    
-    return pred_df['Yes'].values  # 返回阳性类概率
+# 预测函数，基于训练集的预测概率数据来做预测
+def predict_from_probabilities(input_data, train_probs):
+    # 假设 `train_probs` 包含了训练集样本和对应的预测概率
+    # 我们可以根据输入的特征计算最接近的样本，并返回其预测概率
+    # 这里简单实现一个基于输入数据与训练集特征的相似度计算方法
+    # 对于示范，我们直接用`train_probs`中的概率数据来预测
+    # 您可以根据具体情况调整
+    closest_row_idx = np.argmin(np.sum(np.abs(train_probs[feature_names] - input_data), axis=1))
+    return train_probs.iloc[closest_row_idx]['Yes']
 
 if submitted:
     # 构建输入数据
@@ -92,11 +66,13 @@ if submitted:
         Hypertension, Dyslipidemia, HHR, RIDAGEYR,
         INDFMPIR, BMXBMI, LBXWBCSI, LBXRBCSI
     ]
+    
+    # 转化为DataFrame来与训练集数据比较
     input_df = pd.DataFrame([input_data], columns=feature_names)
     
     try:
-        # 执行预测
-        prob_1 = r_predict(input_df)[0]
+        # 使用训练集概率数据进行预测
+        prob_1 = predict_from_probabilities(input_data, train_probs)
         prob_0 = 1 - prob_1
         predicted_class = 1 if prob_1 > 0.56 else 0
         
@@ -118,12 +94,12 @@ if submitted:
         st.subheader("Model Interpretation")
         
         # 准备解释数据
-        background = shap.sample(vad[feature_names], 100)
+        background = shap.sample(val_probs[feature_names], 100)
         
         # 定义SHAP预测函数
         def shap_predict(data):
             input_df = pd.DataFrame(data, columns=feature_names)
-            return np.column_stack([1-r_predict(input_df), r_predict(input_df)])
+            return np.column_stack([1-predict_from_probabilities(input_df), predict_from_probabilities(input_df)])
         
         # 创建解释器
         explainer = shap.KernelExplainer(shap_predict, background)
@@ -138,19 +114,6 @@ if submitted:
                        matplotlib=True,
                        show=False)
         st.pyplot(fig)
-        
-        # LIME解释
-        lime_exp = LimeTabularExplainer(
-            background.values,
-            feature_names=feature_names,
-            class_names=['Low Risk','High Risk'],
-            mode='classification'
-        ).explain_instance()
-        input_df.values[0], 
-        lambda x: np.column_stack([1-r_predict(pd.DataFrame(x, columns=feature_names)),
-                                      r_predict(pd.DataFrame(x, columns=feature_names))])
-        
-        st.components.v1.html(lime_exp.as_html(), height=800)
 
     except Exception as e:
         st.error(f"Prediction Error: {str(e)}")
