@@ -193,7 +193,7 @@ if submitted:
             input_df.values[0], 
             lambda x: np.column_stack((1-r_predict(pd.DataFrame(x, columns=feature_names)),
                                   r_predict(pd.DataFrame(x, columns=feature_names)))),
-            num_features=len(feature_names)
+            num_features=len(feature_names))
         
         st.components.v1.html(lime_exp.as_html(), height=800)
 
