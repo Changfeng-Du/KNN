@@ -74,7 +74,8 @@ def r_predict(input_df):
     with localconverter(robjects.default_converter + pandas2ri.converter):
         r_data = robjects.conversion.py2rpy(input_df)
     
-    r_pred = robjects.r['predict'](
+    # 使用 caret 包的 predict.train 方法进行预测
+    r_pred = robjects.r['predict.train'](
         r_model, 
         newdata=r_data,
         type="prob"
