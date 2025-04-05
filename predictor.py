@@ -82,7 +82,7 @@ def convert_to_r_factors(input_df):
             factor_levels = [str(x) for x in CATEGORICAL_MAP[col]['values']]
             r_data[col] = robjects.FactorVector(
                 input_df[col].astype(str),  # 转换为字符串
-                levels=robjects.StrVector(factor_levels)
+                levels=robjects.StrVector(factor_levels))
         else:
             r_data[col] = input_df[col].values
     return robjects.DataFrame(r_data)
