@@ -121,6 +121,4 @@ if submitted:
         
         st.components.v1.html(lime_exp.as_html(), height=800)
 
-except Exception as e:
-        st.error(f"Prediction Error: {str(e)}")
-        st.stop()
+
