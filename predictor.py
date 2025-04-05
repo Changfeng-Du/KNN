@@ -41,6 +41,55 @@ feature_names = [
     'INDFMPIR', 'BMXBMI', 'LBXWBCSI', 'LBXRBCSI'
 ]
 
+# 修改后的预测函数
+def r_predict(input_df):
+    with localconverter(robjects.default_converter + pandas2ri.converter):
+        r_data = robjects.conversion.py2rpy(input_df)
+    
+    predict_r = robjects.r['predict']
+    
+    try:
+        # 尝试获取概率预测
+        r_pred_prob = predict_r(r_model, newdata=r_data, type="prob")
+        
+        # 将R对象转换为Python对象
+        with localconverter(robjects.default_converter + pandas2ri.converter):
+            pred_prob = robjects.conversion.rpy2py(r_pred_prob)
+        
+        # 处理不同概率返回格式
+        if isinstance(pred_prob, pd.DataFrame):
+            # DataFrame格式（包含'Yes'列）
+            if 'Yes' in pred_prob.columns:
+                prob_yes = pred_prob['Yes'].values
+            else:
+                # 假设第二列是阳性概率
+                prob_yes = pred_prob.iloc[:, 1].values
+        elif isinstance(pred_prob, np.ndarray):
+            # Numpy数组格式（假设第二列是阳性概率）
+            prob_yes = pred_prob[:, 1] if pred_prob.ndim == 2 else pred_prob
+        else:
+            raise ValueError("Unsupported probability format")
+            
+        return prob_yes
+    
+    except Exception as e:
+        st.warning(f"Probability prediction failed: {str(e)}, attempting class prediction...")
+        try:
+            # 获取原始类别预测
+            r_pred_class = predict_r(r_model, newdata=r_data)
+            y_pred = np.array(r_pred_class).flatten().astype(int)
+            
+            # 处理R的1/2编码
+            if set(y_pred) == {1, 2}:
+                y_pred = y_pred - 1
+            
+            # 返回模拟概率（1表示100%，0表示0%）
+            return y_pred.astype(float)
+        
+        except Exception as class_error:
+            st.error(f"Prediction failed completely: {str(class_error)}")
+            raise
+
 # Streamlit界面
 st.title("Co-occurrence Risk Predictor (R Model)")
 
@@ -69,23 +118,6 @@ with st.form("input_form"):
 
     submitted = st.form_submit_button("Predict")
 
-# 预测函数
-def r_predict(input_df):
-    with localconverter(robjects.default_converter + pandas2ri.converter):
-        r_data = robjects.conversion.py2rpy(input_df)
-    
-    # 获取预测的概率
-    r_pred = robjects.r['predict'](
-        r_model, 
-        newdata=r_data,
-        type="prob"
-    )
-    
-    with localconverter(robjects.default_converter + pandas2ri.converter):
-        pred_df = robjects.conversion.rpy2py(r_pred)
-    
-    return pred_df['Yes'].values  # 返回阳性类的概率
-
 if submitted:
     # 构建输入数据
     input_data = [
@@ -97,16 +129,23 @@ if submitted:
     
     try:
         # 执行预测
-        prob_1 = r_predict(input_df)[0]  # 获取阳性类别的概率
-        prob_0 = 1 - prob_1  # 计算阴性类别的概率
-        
-        # 设置阈值来判断类别，0.56是阈值，依据实际需求调整
-        predicted_class = 1 if prob_1 > 0.56 else 0
+        prob_1 = r_predict(input_df)[0]
+        prob_0 = 1 - prob_1
+        # 使用代码1中确定的阈值
+        predicted_class = 1 if prob_1 > 0.626107357806162 else 0
         
         # 显示结果
         st.success("### Prediction Results")
-        st.metric("Comorbidity Risk", f"{prob_1*100:.1f}%", 
-                help="Probability of having both conditions")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Comorbidity Risk", 
+                      f"{prob_1*100:.1f}%", 
+                      delta=f"{'High' if predicted_class==1 else 'Low'} risk",
+                      help="Probability of having both conditions")
+        with col2:
+            st.metric("Decision Threshold", 
+                      "62.6%", 
+                      help="Cut-off value for risk classification")
         
         # 生成建议
         advice_template = """
@@ -115,7 +154,8 @@ if submitted:
         - Monitor blood pressure weekly
         - Mediterranean diet recommended
         {}"""
-        st.info(advice_template.format("Immediate consultation needed!" if predicted_class==1 else "Maintain healthy lifestyle"))
+        additional_advice = "Immediate consultation recommended!" if predicted_class==1 else "Maintain current healthy lifestyle"
+        st.info(advice_template.format(additional_advice))
 
         # SHAP解释
         st.subheader("Model Interpretation")
@@ -126,7 +166,8 @@ if submitted:
         # 定义SHAP预测函数
         def shap_predict(data):
             input_df = pd.DataFrame(data, columns=feature_names)
-            return np.column_stack([1-r_predict(input_df), r_predict(input_df)])
+            prob = r_predict(input_df)
+            return np.column_stack([1-prob, prob])
         
         # 创建解释器
         explainer = shap.KernelExplainer(shap_predict, background)
@@ -134,9 +175,9 @@ if submitted:
         
         # 可视化
         st.subheader("Feature Impact")
-        fig, ax = plt.subplots()
+        fig, ax = plt.subplots(figsize=(10, 6))
         shap.force_plot(explainer.expected_value[1], 
-                       shap_values[0][:,1], 
+                       shap_values[1][0],  # 使用阳性类的SHAP值
                        input_df.iloc[0],
                        matplotlib=True,
                        show=False)
@@ -148,9 +189,11 @@ if submitted:
             feature_names=feature_names,
             class_names=['Low Risk','High Risk'],
             mode='classification'
-        ).explain_instance(input_df.values[0], 
-                          lambda x: np.column_stack([1-r_predict(pd.DataFrame(x, columns=feature_names)),
-                                                     r_predict(pd.DataFrame(x, columns=feature_names))]))
+        ).explain_instance(
+            input_df.values[0], 
+            lambda x: np.column_stack([1-r_predict(pd.DataFrame(x, columns=feature_names)),
+                                  r_predict(pd.DataFrame(x, columns=feature_names))),
+            num_features=len(feature_names)
         
         st.components.v1.html(lime_exp.as_html(), height=800)
 
