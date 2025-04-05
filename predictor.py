@@ -48,7 +48,7 @@ with st.form("input_form"):
 
 # 预测函数
 def get_knn_prediction(input_data, knn_probs):
-    # 这里根据输入的数据去寻找相似的预测概率
+    # 假设knn_probs中每行是一个预测概率，你需要根据实际情况选择最接近的行
     pred_prob = knn_probs.loc[knn_probs['target'] == input_data[0], ['No', 'Yes']].values
     if pred_prob.size == 0:
         return None  # 如果没有找到合适的预测行
@@ -89,21 +89,21 @@ if submitted:
     st.subheader("Model Interpretation")
     
     # 准备解释数据
-    feature_names = ['smoker', 'sex', 'carace', 'drink', 'sleep', 'Hypertension', 'Dyslipidemia', 'HHR', 'RIDAGEYR', 'INDFMPIR', 'BMXBMI', 'LBXWBCSI', 'LBXRBCSI']
     background = vad[feature_names].sample(100)  # 确保样本数量一致
     
     # 定义 SHAP 预测函数
     def shap_predict(data):
         input_df = pd.DataFrame(data, columns=feature_names)
-        return np.column_stack([1 - prob_1, prob_1])  # 返回两个类别的概率
+        # 返回模型的两个类别概率
+        return np.column_stack([1 - prob_1, prob_1])
 
     # 创建解释器
     explainer = shap.KernelExplainer(shap_predict, background)
     shap_values = explainer.shap_values(input_data, nsamples=100)
     
     # 可视化
-    st.subheader("Feature Impact (SHAP)")
-    fig, ax = plt.subplots(figsize=(10, 6))
+    st.subheader("Feature Impact")
+    fig, ax = plt.subplots()
     shap.force_plot(explainer.expected_value[1], 
                    shap_values[0][:, 1], 
                    input_data,
@@ -120,6 +120,5 @@ if submitted:
     ).explain_instance(input_data, 
                        lambda x: np.column_stack([1 - prob_1, prob_1]))
 
-    # 显示LIME解释的HTML内容
-    st.subheader("LIME Explanation")
     st.components.v1.html(lime_exp.as_html(), height=800)
+
