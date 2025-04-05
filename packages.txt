@@ -1,2 +1,3 @@
 default-jre
 jtreg
+r-base
