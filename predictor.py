@@ -15,7 +15,7 @@ robjects.r['options'](warn=-1)
 # 加载R模型
 @st.cache_resource
 def load_r_model():
-    r_model = robjects.r['readRDS']('r_model.rds')
+    r_model = robjects.r['readRDS']('knn_model.rds')
     
     # 动态修补Pandas兼容性
     if not hasattr(pd.DataFrame, 'iteritems'):
