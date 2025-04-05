@@ -1,9 +1,12 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import shap
-import matplotlib.pyplot as plt
-from lime.lime_tabular import LimeTabularExplainer
+
+# 加载KNN预测概率的CSV文件
+@st.cache_data
+def load_knn_probabilities():
+    knn_probs = pd.read_csv('test_probe.csv')
+    return knn_probs
 
 # 加载数据
 @st.cache_data
@@ -12,16 +15,7 @@ def load_data():
     vad = pd.read_csv('vad.csv')
     return dev, vad
 
-dev, vad = load_data()
-
-# 读取 KNN 预测概率的 CSV 文件
-@st.cache_data
-def load_knn_probabilities():
-    return pd.read_csv('test_probe.csv')
-
-knn_probs = load_knn_probabilities()
-
-# Streamlit 界面
+# Streamlit界面
 st.title("Co-occurrence Risk Predictor (KNN Model)")
 
 # 创建输入表单
@@ -29,17 +23,17 @@ with st.form("input_form"):
     col1, col2 = st.columns(2)
     
     with col1:
-        smoker = st.selectbox("Smoker:", [1, 2, 3], 
-                            format_func=lambda x: "Never" if x == 1 else "Former" if x == 2 else "Current")
-        sex = st.selectbox("Sex:", [1, 2], format_func=lambda x: "Female" if x == 1 else "Male")
-        carace = st.selectbox("Race:", [1, 2, 3, 4, 5], 
-                            format_func=lambda x: ["Mexican", "Hispanic", "White", "Black", "Other"][x - 1])
-        drink = st.selectbox("Alcohol:", [1, 2], format_func=lambda x: "No" if x == 1 else "Yes")
-        sleep = st.selectbox("Sleep:", [1, 2], format_func=lambda x: "Problem" if x == 1 else "Normal")
+        smoker = st.selectbox("Smoker:", [1,2,3], 
+                            format_func=lambda x: "Never" if x==1 else "Former" if x==2 else "Current")
+        sex = st.selectbox("Sex:", [1,2], format_func=lambda x: "Female" if x==1 else "Male")
+        carace = st.selectbox("Race:", [1,2,3,4,5], 
+                            format_func=lambda x: ["Mexican","Hispanic","White","Black","Other"][x-1])
+        drink = st.selectbox("Alcohol:", [1,2], format_func=lambda x: "No" if x==1 else "Yes")
+        sleep = st.selectbox("Sleep:", [1,2], format_func=lambda x: "Problem" if x==1 else "Normal")
         
     with col2:
-        Hypertension = st.selectbox("Hypertension:", [1, 2], format_func=lambda x: "No" if x == 1 else "Yes")
-        Dyslipidemia = st.selectbox("Dyslipidemia:", [1, 2], format_func=lambda x: "No" if x == 1 else "Yes")
+        Hypertension = st.selectbox("Hypertension:", [1,2], format_func=lambda x: "No" if x==1 else "Yes")
+        Dyslipidemia = st.selectbox("Dyslipidemia:", [1,2], format_func=lambda x: "No" if x==1 else "Yes")
         HHR = st.number_input("HHR Ratio:", min_value=0.2, max_value=1.7, value=1.0)
         RIDAGEYR = st.number_input("Age:", min_value=20, max_value=80, value=50)
         INDFMPIR = st.number_input("Poverty Ratio:", min_value=0.0, max_value=5.0, value=2.0)
@@ -49,49 +43,35 @@ with st.form("input_form"):
 
     submitted = st.form_submit_button("Predict")
 
-# 特征顺序（确保与模型训练时的特征顺序一致）
-feature_names = [
-    'smoker', 'sex', 'carace', 'drink', 'sleep',
-    'Hypertension', 'Dyslipidemia', 'HHR', 'RIDAGEYR',
-    'INDFMPIR', 'BMXBMI', 'LBXWBCSI', 'LBXRBCSI'
-]
-
 # 预测函数
-def predict_class(input_df, knn_probs):
-    # 在 CSV 文件中找到与输入数据匹配的预测概率
-    input_tuple = tuple(input_df.iloc[0])
-    matching_row = knn_probs[knn_probs[feature_names].apply(tuple, axis=1) == input_tuple]
-    
-    if matching_row.empty:
-        return None  # 没有匹配的行，返回 None
-    
-    # 假设概率列是 'Yes' 和 'No'，可以根据具体的 CSV 结构修改
-    prob_1 = matching_row['Yes'].values[0]
-    prob_0 = 1 - prob_1
-    predicted_class = 1 if prob_1 > 0.56 else 0
-    return prob_1, prob_0, predicted_class
+def get_knn_prediction(input_data, knn_probs):
+    # 这里根据输入的数据去寻找相似的预测概率
+    # 假设knn_probs中每行是一个预测概率，你需要根据实际情况选择最接近的行
+    # 举个例子，假设我们选择 target 最接近的预测行
+    pred_prob = knn_probs.loc[knn_probs['target'] == input_data[0], ['No', 'Yes']].values
+    if pred_prob.size == 0:
+        return None  # 如果没有找到合适的预测行
+    return pred_prob[0]
 
 if submitted:
-    # 构建输入数据
-    input_data = [
-        smoker, sex, carace, drink, sleep,
-        Hypertension, Dyslipidemia, HHR, RIDAGEYR,
-        INDFMPIR, BMXBMI, LBXWBCSI, LBXRBCSI
-    ]
-    input_df = pd.DataFrame([input_data], columns=feature_names)
+    # 构建输入数据（这里仅使用 target 列作为输入数据）
+    input_data = [smoker, sex, carace, drink, sleep, Hypertension, Dyslipidemia, HHR, RIDAGEYR, INDFMPIR, BMXBMI, LBXWBCSI, LBXRBCSI]
     
-    try:
-        # 执行预测
-        prob_1, prob_0, predicted_class = predict_class(input_df, knn_probs)
-        
-        if prob_1 is None:
-            st.error("No matching record found in the prediction probabilities.")
-            st.stop()
+    # 加载KNN预测概率
+    knn_probs = load_knn_probabilities()
+
+    # 执行预测
+    pred_prob = get_knn_prediction(input_data, knn_probs)
+    
+    if pred_prob is not None:
+        prob_1 = pred_prob[1]  # 'Yes'类的概率
+        prob_0 = pred_prob[0]  # 'No'类的概率
+        predicted_class = 1 if prob_1 > 0.56 else 0
         
         # 显示结果
         st.success("### Prediction Results")
-        st.metric("Comorbidity Risk", f"{prob_1 * 100:.1f}%", 
-                help="Probability of having both conditions")
+        st.metric("Comorbidity Risk", f"{prob_1*100:.1f}%", 
+                  help="Probability of having both conditions")
         
         # 生成建议
         advice_template = """
@@ -101,6 +81,9 @@ if submitted:
         - Mediterranean diet recommended
         {}"""
         st.info(advice_template.format("Immediate consultation needed!" if predicted_class == 1 else "Maintain healthy lifestyle"))
+    else:
+        st.error("No matching prediction found in the KNN model data.")
+
 
         # SHAP解释
         st.subheader("Model Interpretation")
