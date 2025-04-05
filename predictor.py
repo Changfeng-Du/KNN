@@ -7,10 +7,17 @@ from lime.lime_tabular import LimeTabularExplainer
 import rpy2.robjects as robjects
 from rpy2.robjects import pandas2ri
 from rpy2.robjects.conversion import localconverter
+import rpy2.robjects.packages as rpackages
 
 # 初始化R环境
 pandas2ri.activate()
 robjects.r['options'](warn=-1)
+
+# 确保加载caret包（用于predict.train）
+utils = rpackages.importr('utils')
+utils.chooseCRANmirror(ind=1)  # 选择镜像
+robjects.r('install.packages("caret")')  # 如果尚未安装，安装caret
+caret = rpackages.importr('caret')
 
 # 加载R模型
 @st.cache_resource
@@ -49,17 +56,17 @@ with st.form("input_form"):
     col1, col2 = st.columns(2)
     
     with col1:
-        smoker = st.selectbox("Smoker:", [1,2,3], 
-                            format_func=lambda x: "Never" if x==1 else "Former" if x==2 else "Current")
-        sex = st.selectbox("Sex:", [1,2], format_func=lambda x: "Female" if x==1 else "Male")
-        carace = st.selectbox("Race:", [1,2,3,4,5], 
-                            format_func=lambda x: ["Mexican","Hispanic","White","Black","Other"][x-1])
-        drink = st.selectbox("Alcohol:", [1,2], format_func=lambda x: "No" if x==1 else "Yes")
-        sleep = st.selectbox("Sleep:", [1,2], format_func=lambda x: "Problem" if x==1 else "Normal")
+        smoker = st.selectbox("Smoker:", [1, 2, 3], 
+                            format_func=lambda x: "Never" if x == 1 else "Former" if x == 2 else "Current")
+        sex = st.selectbox("Sex:", [1, 2], format_func=lambda x: "Female" if x == 1 else "Male")
+        carace = st.selectbox("Race:", [1, 2, 3, 4, 5], 
+                            format_func=lambda x: ["Mexican", "Hispanic", "White", "Black", "Other"][x - 1])
+        drink = st.selectbox("Alcohol:", [1, 2], format_func=lambda x: "No" if x == 1 else "Yes")
+        sleep = st.selectbox("Sleep:", [1, 2], format_func=lambda x: "Problem" if x == 1 else "Normal")
         
     with col2:
-        Hypertension = st.selectbox("Hypertension:", [1,2], format_func=lambda x: "No" if x==1 else "Yes")
-        Dyslipidemia = st.selectbox("Dyslipidemia:", [1,2], format_func=lambda x: "No" if x==1 else "Yes")
+        Hypertension = st.selectbox("Hypertension:", [1, 2], format_func=lambda x: "No" if x == 1 else "Yes")
+        Dyslipidemia = st.selectbox("Dyslipidemia:", [1, 2], format_func=lambda x: "No" if x == 1 else "Yes")
         HHR = st.number_input("HHR Ratio:", min_value=0.2, max_value=1.7, value=1.0)
         RIDAGEYR = st.number_input("Age:", min_value=20, max_value=80, value=50)
         INDFMPIR = st.number_input("Poverty Ratio:", min_value=0.0, max_value=5.0, value=2.0)
@@ -74,18 +81,20 @@ def r_predict(input_df):
     with localconverter(robjects.default_converter + pandas2ri.converter):
         r_data = robjects.conversion.py2rpy(input_df)
     
-    r_pred = robjects.r['predict'](
+    # 使用 caret 包中的 predict.train 方法进行预测
+    r_pred = robjects.r['predict.train'](
         r_model, 
         newdata=r_data,
-        type="prob"
+        type="prob"  # 获取概率
     )
     
-    # 获取 'probability(1)' 和 'probability(0)' 数据
-    prob_1 = r_pred.rx2('probability.1')[0]
-    prob_0 = r_pred.rx2('probability.0')[0]
+    # 获取 'probability.1' 和 'probability.0' 数据
+    prob_1 = r_pred.rx2('probability.1')[0]  # 阳性类概率
+    prob_0 = r_pred.rx2('probability.0')[0]  # 阴性类概率
     
-    return prob_1, prob_0  # 返回阳性类和阴性类的概率
+    return prob_1, prob_0  # 返回概率
 
+# 执行预测
 if submitted:
     # 构建输入数据
     input_data = [
@@ -103,7 +112,7 @@ if submitted:
         # 显示结果
         st.success("### Prediction Results")
         st.metric("Comorbidity Risk", f"{prob_1*100:.1f}%", 
-                help="Probability of having both conditions")
+                  help="Probability of having both conditions")
         
         # 生成建议
         advice_template = """
@@ -112,7 +121,7 @@ if submitted:
         - Monitor blood pressure weekly
         - Mediterranean diet recommended
         {}"""
-        st.info(advice_template.format("Immediate consultation needed!" if predicted_class==1 else "Maintain healthy lifestyle"))
+        st.info(advice_template.format("Immediate consultation needed!" if predicted_class == 1 else "Maintain healthy lifestyle"))
 
         # SHAP解释
         st.subheader("Model Interpretation")
@@ -123,7 +132,7 @@ if submitted:
         # 定义SHAP预测函数
         def shap_predict(data):
             input_df = pd.DataFrame(data, columns=feature_names)
-            return np.column_stack([1-r_predict(input_df)[0], r_predict(input_df)[0]])  # 调整为返回两个类的概率
+            return np.column_stack([1 - r_predict(input_df)[0], r_predict(input_df)[0]])  # 调整为返回两个类的概率
         
         # 创建解释器
         explainer = shap.KernelExplainer(shap_predict, background)
@@ -133,20 +142,20 @@ if submitted:
         st.subheader("Feature Impact")
         fig, ax = plt.subplots()
         shap.force_plot(explainer.expected_value[1], 
-                       shap_values[0][:,1], 
-                       input_df.iloc[0],
-                       matplotlib=True,
-                       show=False)
+                        shap_values[0][:, 1], 
+                        input_df.iloc[0],
+                        matplotlib=True,
+                        show=False)
         st.pyplot(fig)
         
         # LIME解释
         lime_exp = LimeTabularExplainer(
             background.values,
             feature_names=feature_names,
-            class_names=['Low Risk','High Risk'],
+            class_names=['Low Risk', 'High Risk'],
             mode='classification'
         ).explain_instance(input_df.values[0], 
-                           lambda x: np.column_stack([1-r_predict(pd.DataFrame(x, columns=feature_names))[0],
+                           lambda x: np.column_stack([1 - r_predict(pd.DataFrame(x, columns=feature_names))[0],
                                                       r_predict(pd.DataFrame(x, columns=feature_names))[0]]))
         
         st.components.v1.html(lime_exp.as_html(), height=800)
