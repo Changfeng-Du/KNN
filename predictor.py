@@ -1,29 +1,12 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import shap
-import matplotlib.pyplot as plt
-from lime.lime_tabular import LimeTabularExplainer
-import rpy2.robjects as robjects
-from rpy2.robjects import pandas2ri
-from rpy2.robjects.conversion import localconverter
 
-# 初始化R环境
-pandas2ri.activate()
-robjects.r['options'](warn=-1)
-
-# 加载R模型
-@st.cache_resource
-def load_r_model():
-    r_model = robjects.r['readRDS']('knn_model.rds')
-    
-    # 动态修补Pandas兼容性
-    if not hasattr(pd.DataFrame, 'iteritems'):
-        pd.DataFrame.iteritems = pd.DataFrame.items
-        
-    return r_model
-
-r_model = load_r_model()
+# 加载KNN预测概率的CSV文件
+@st.cache_data
+def load_knn_probabilities():
+    knn_probs = pd.read_csv('test_probe.csv')
+    return knn_probs
 
 # 加载数据
 @st.cache_data
@@ -32,31 +15,8 @@ def load_data():
     vad = pd.read_csv('vad.csv')
     return dev, vad
 
-dev, vad = load_data()
-
-# 加载训练集和验证集的预测概率数据
-@st.cache_data
-def load_pred_probabilities():
-    train_probe = pd.read_csv('train_probe.csv')
-    test_probe = pd.read_csv('test_probe.csv')
-    
-    # 强制确保列名正确
-    train_probe.columns = train_probe.columns.str.strip()
-    test_probe.columns = test_probe.columns.str.strip()
-    
-    return train_probe, test_probe
-
-train_probe, test_probe = load_pred_probabilities()
-
-# 定义特征顺序（根据实际数据调整）
-feature_names = [
-    'smoker', 'sex', 'carace', 'drink', 'sleep',
-    'Hypertension', 'Dyslipidemia', 'HHR', 'RIDAGEYR',
-    'INDFMPIR', 'BMXBMI', 'LBXWBCSI', 'LBXRBCSI'
-]
-
 # Streamlit界面
-st.title("Co-occurrence Risk Predictor (R Model)")
+st.title("Co-occurrence Risk Predictor (KNN Model)")
 
 # 创建输入表单
 with st.form("input_form"):
@@ -83,42 +43,31 @@ with st.form("input_form"):
 
     submitted = st.form_submit_button("Predict")
 
-# 预测函数 (基于概率文件)
-def predict_from_probabilities(input_data, probability_data):
-    # 确保列名匹配
-    input_df = pd.DataFrame([input_data], columns=feature_names)
-    
-    # 打印输入数据和概率数据的列名，帮助调试
-    st.write("Input Data Columns: ", input_df.columns)
-    st.write("Probability Data Columns: ", probability_data.columns)
-
-    if set(input_df.columns).issubset(probability_data.columns):
-        pred_data = probability_data[['No', 'Yes']]
-        # 使用输入数据的索引来查找对应的预测概率
-        idx = probability_data[probability_data[feature_names].eq(input_data).all(axis=1)].index[0]
-        
-        prob_1 = pred_data.loc[idx, 'Yes']
-        prob_0 = 1 - prob_1
-        predicted_class = 1 if prob_1 > 0.56 else 0
-        
-        return prob_1, predicted_class
-    else:
-        raise ValueError(f"Feature columns in input data do not match with probability data columns.")
+# 预测函数
+def get_knn_prediction(input_data, knn_probs):
+    # 这里根据输入的数据去寻找相似的预测概率
+    # 假设knn_probs中每行是一个预测概率，你需要根据实际情况选择最接近的行
+    # 举个例子，假设我们选择 target 最接近的预测行
+    pred_prob = knn_probs.loc[knn_probs['target'] == input_data[0], ['No', 'Yes']].values
+    if pred_prob.size == 0:
+        return None  # 如果没有找到合适的预测行
+    return pred_prob[0]
 
 if submitted:
-    # 构建输入数据
-    input_data = [
-        smoker, sex, carace, drink, sleep,
-        Hypertension, Dyslipidemia, HHR, RIDAGEYR,
-        INDFMPIR, BMXBMI, LBXWBCSI, LBXRBCSI
-    ]
+    # 构建输入数据（这里仅使用 target 列作为输入数据）
+    input_data = [smoker, sex, carace, drink, sleep, Hypertension, Dyslipidemia, HHR, RIDAGEYR, INDFMPIR, BMXBMI, LBXWBCSI, LBXRBCSI]
     
-    input_df = pd.DataFrame([input_data], columns=feature_names)
-    
-    # 进行预测
-    try:
-        prob_1, predicted_class = predict_from_probabilities(input_data, test_probe)
+    # 加载KNN预测概率
+    knn_probs = load_knn_probabilities()
 
+    # 执行预测
+    pred_prob = get_knn_prediction(input_data, knn_probs)
+    
+    if pred_prob is not None:
+        prob_1 = pred_prob[1]  # 'Yes'类的概率
+        prob_0 = pred_prob[0]  # 'No'类的概率
+        predicted_class = 1 if prob_1 > 0.56 else 0
+        
         # 显示结果
         st.success("### Prediction Results")
         st.metric("Comorbidity Risk", f"{prob_1*100:.1f}%", 
@@ -132,45 +81,5 @@ if submitted:
         - Mediterranean diet recommended
         {}"""
         st.info(advice_template.format("Immediate consultation needed!" if predicted_class == 1 else "Maintain healthy lifestyle"))
-
-        # SHAP解释
-        st.subheader("Model Interpretation")
-        
-        # 准备解释数据
-        background = shap.sample(test_probe[feature_names], 100)
-        
-        # 定义SHAP预测函数
-        def shap_predict(data):
-            input_df = pd.DataFrame(data, columns=feature_names)
-            return np.column_stack([1 - predict_from_probabilities(input_df, test_probe)[0], 
-                                    predict_from_probabilities(input_df, test_probe)[0]])
-        
-        # 创建解释器
-        explainer = shap.KernelExplainer(shap_predict, background)
-        shap_values = explainer.shap_values(input_data, nsamples=100)
-        
-        # 可视化
-        st.subheader("Feature Impact")
-        fig, ax = plt.subplots()
-        shap.force_plot(explainer.expected_value[1], 
-                        shap_values[0][:,1], 
-                        input_data,
-                        matplotlib=True,
-                        show=False)
-        st.pyplot(fig)
-
-        # LIME解释
-        lime_exp = LimeTabularExplainer(
-            background.values,
-            feature_names=feature_names,
-            class_names=['Low Risk', 'High Risk'],
-            mode='classification'
-        ).explain_instance(input_data, 
-                           lambda x: np.column_stack([1 - predict_from_probabilities(pd.DataFrame(x, columns=feature_names), test_probe)[0], 
-                                                      predict_from_probabilities(pd.DataFrame(x, columns=feature_names), test_probe)[0]]))
-        
-        st.components.v1.html(lime_exp.as_html(), height=800)
-
-    except Exception as e:
-        st.error(f"Prediction Error: {str(e)}")
-        st.stop()
+    else:
+        st.error("No matching prediction found in the KNN model data.")
