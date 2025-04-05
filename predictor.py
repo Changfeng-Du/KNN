@@ -13,33 +13,6 @@ from sklearn.metrics import roc_curve, auc
 pandas2ri.activate()
 robjects.r['options'](warn=-1)
 
-# 加载R模型和评估数据
-@st.cache_resource
-def load_resources():
-    # 加载R模型
-    r_model = robjects.r['readRDS']('knn_model.rds')
-    
-    # 加载评估数据
-    train_probe = pd.read_csv('train_probe.csv', sep='\t')
-    test_probe = pd.read_csv('test_probe.csv', sep='\t')
-    
-    # 动态修补Pandas兼容性
-    if not hasattr(pd.DataFrame, 'iteritems'):
-        pd.DataFrame.iteritems = pd.DataFrame.items
-        
-    return r_model, train_probe, test_probe
-
-r_model, train_probe, test_probe = load_resources()
-
-# 加载特征数据
-@st.cache_data
-def load_data():
-    dev = pd.read_csv('dev.csv')
-    vad = pd.read_csv('vad.csv')
-    return dev, vad
-
-dev, vad = load_data()
-
 # 分类变量映射
 CATEGORICAL_MAP = {
     'smoker': [1, 2, 3],
@@ -51,6 +24,27 @@ CATEGORICAL_MAP = {
     'Dyslipidemia': [1, 2]
 }
 
+# 加载资源和数据
+@st.cache_resource
+def load_resources():
+    # 加载R模型
+    r_model = robjects.r['readRDS']('knn_model.rds')
+    
+    # 动态修补Pandas兼容性
+    if not hasattr(pd.DataFrame, 'iteritems'):
+        pd.DataFrame.iteritems = pd.DataFrame.items
+        
+    return r_model
+
+@st.cache_data
+def load_data():
+    dev = pd.read_csv('dev.csv')
+    vad = pd.read_csv('vad.csv')
+    return dev, vad
+
+r_model = load_resources()
+dev, vad = load_data()
+
 # 特征顺序
 feature_names = [
     'smoker', 'sex', 'carace', 'drink', 'sleep',
@@ -58,26 +52,33 @@ feature_names = [
     'INDFMPIR', 'BMXBMI', 'LBXWBCSI', 'LBXRBCSI'
 ]
 
+# 数据转换函数
+def convert_to_r_factors(input_df):
+    """将分类变量转换为R因子"""
+    r_data = {}
+    for col in input_df.columns:
+        if col in CATEGORICAL_MAP:
+            r_data[col] = robjects.FactorVector(
+                input_df[col],
+                levels=robjects.IntVector(CATEGORICAL_MAP[col])
+            )
+        else:
+            r_data[col] = input_df[col].values
+    return robjects.DataFrame(r_data)
+
+# 预测函数
+def r_predict(input_df):
+    try:
+        with localconverter(robjects.default_converter + pandas2ri.converter):
+            r_data = convert_to_r_factors(input_df)
+            r_pred = robjects.r['predict'](r_model, newdata=r_data, type="prob")
+            pred_df = robjects.conversion.rpy2py(r_pred)
+        return pred_df['Yes'].values
+    except Exception as e:
+        raise RuntimeError(f"Prediction failed: {str(e)}")
+
 # Streamlit界面
 st.title("Co-occurrence Risk Predictor (R Model)")
-
-# 模型性能展示
-if st.sidebar.checkbox("Show Model Performance"):
-    st.subheader("ROC Curve on Test Set")
-    
-    fpr, tpr, _ = roc_curve(test_probe['target'], test_probe['Yes'])
-    roc_auc = auc(fpr, tpr)
-
-    fig, ax = plt.subplots()
-    ax.plot(fpr, tpr, color='darkorange', lw=2, 
-            label=f'ROC curve (AUC = {roc_auc:.2f})')
-    ax.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
-    ax.set_xlim([0.0, 1.0])
-    ax.set_ylim([0.0, 1.05])
-    ax.set_xlabel('False Positive Rate')
-    ax.set_ylabel('True Positive Rate')
-    ax.legend(loc="lower right")
-    st.pyplot(fig)
 
 # 创建输入表单
 with st.form("input_form"):
@@ -109,29 +110,6 @@ with st.form("input_form"):
 
     submitted = st.form_submit_button("Predict")
 
-def convert_to_r_factors(input_df):
-    """将分类变量转换为R因子"""
-    r_data = {}
-    for col in input_df.columns:
-        if col in CATEGORICAL_MAP:
-            r_data[col] = robjects.FactorVector(
-                input_df[col],
-                levels=robjects.IntVector(CATEGORICAL_MAP[col]))
-        else:
-            r_data[col] = input_df[col].values
-    return robjects.DataFrame(r_data)
-
-# 预测函数
-def r_predict(input_df):
-    try:
-        with localconverter(robjects.default_converter + pandas2ri.converter):
-            r_data = convert_to_r_factors(input_df)
-            r_pred = robjects.r['predict'](r_model, newdata=r_data, type="prob")
-            pred_df = robjects.conversion.rpy2py(r_pred)
-        return pred_df['Yes'].values
-    except Exception as e:
-        raise RuntimeError(f"Prediction failed: {str(e)}")
-
 if submitted:
     # 构建输入数据
     input_data = [
@@ -153,18 +131,7 @@ if submitted:
             st.metric("High Risk Probability", f"{prob_1*100:.1f}%")
         with col2:
             st.metric("Recommended Action", 
-                    "Immediate Intervention" if predicted_class else "Routine Monitoring")
-
-        # 生成建议
-        advice = """
-        **Clinical Recommendations:**
-        - Monthly cardiovascular screening
-        - Daily blood pressure monitoring
-        - Mediterranean diet plan
-        - 150 mins/week moderate exercise
-        {}"""
-        st.info(advice.format("**▲ High Risk: Consult specialist immediately**" 
-                            if predicted_class else "**▼ Low Risk: Maintain current lifestyle**"))
+                      "Immediate Intervention" if predicted_class else "Routine Monitoring")
 
         # SHAP解释
         st.subheader("SHAP Feature Impact")
@@ -189,14 +156,14 @@ if submitted:
                 return np.column_stack([1 - r_predict(pd.DataFrame(x, columns=feature_names)),
                                       r_predict(pd.DataFrame(x, columns=feature_names))])
 
-            explainer = LimeTabularExplainer(
+            lime_explainer = LimeTabularExplainer(
                 dev[feature_names].values,
                 feature_names=feature_names,
                 class_names=['Low Risk', 'High Risk'],
                 mode='classification'
             )
 
-            exp = explainer.explain_instance(
+            exp = lime_explainer.explain_instance(
                 input_df.values[0], 
                 lime_predict,
                 num_features=8
