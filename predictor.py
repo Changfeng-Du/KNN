@@ -74,6 +74,7 @@ def r_predict(input_df):
     with localconverter(robjects.default_converter + pandas2ri.converter):
         r_data = robjects.conversion.py2rpy(input_df)
     
+    # 获取预测的概率
     r_pred = robjects.r['predict'](
         r_model, 
         newdata=r_data,
@@ -83,7 +84,7 @@ def r_predict(input_df):
     with localconverter(robjects.default_converter + pandas2ri.converter):
         pred_df = robjects.conversion.rpy2py(r_pred)
     
-    return pred_df['Yes'].values  # 返回阳性类概率
+    return pred_df['Yes'].values  # 返回阳性类的概率
 
 if submitted:
     # 构建输入数据
@@ -96,8 +97,10 @@ if submitted:
     
     try:
         # 执行预测
-        prob_1 = r_predict(input_df)[0]
-        prob_0 = 1 - prob_1
+        prob_1 = r_predict(input_df)[0]  # 获取阳性类别的概率
+        prob_0 = 1 - prob_1  # 计算阴性类别的概率
+        
+        # 设置阈值来判断类别，0.56是阈值，依据实际需求调整
         predicted_class = 1 if prob_1 > 0.56 else 0
         
         # 显示结果
@@ -145,10 +148,9 @@ if submitted:
             feature_names=feature_names,
             class_names=['Low Risk','High Risk'],
             mode='classification'
-        ).explain_instance()
-        input_df.values[0], 
-        lambda x: np.column_stack([1-r_predict(pd.DataFrame(x, columns=feature_names)),
-                                      r_predict(pd.DataFrame(x, columns=feature_names))])
+        ).explain_instance(input_df.values[0], 
+                          lambda x: np.column_stack([1-r_predict(pd.DataFrame(x, columns=feature_names)),
+                                                     r_predict(pd.DataFrame(x, columns=feature_names))]))
         
         st.components.v1.html(lime_exp.as_html(), height=800)
 
