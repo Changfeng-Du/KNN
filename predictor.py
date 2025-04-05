@@ -146,9 +146,9 @@ if submitted:
             class_names=['Low Risk','High Risk'],
             mode='classification'
         ).explain_instance(
-            input_df.values[0], 
-            lambda x: np.column_stack([1-r_predict(pd.DataFrame(x, columns=feature_names)),
-                                      r_predict(pd.DataFrame(x, columns=feature_names))])
+        input_df.values[0], 
+        lambda x: np.column_stack([1-r_predict(pd.DataFrame(x, columns=feature_names)),
+                                    r_predict(pd.DataFrame(x, columns=feature_names))])
         
         st.components.v1.html(lime_exp.as_html(), height=800)
 
