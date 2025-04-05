@@ -12,49 +12,9 @@ from rpy2.robjects.conversion import localconverter
 pandas2ri.activate()
 robjects.r['options'](warn=-1)
 
-# 分类变量映射
-CATEGORICAL_MAP = {
-    'smoker': {
-        'values': [1, 2, 3],
-        'labels': ["Never", "Former", "Current"]
-    },
-    'sex': {
-        'values': [1, 2],
-        'labels': ["Female", "Male"]
-    },
-    'carace': {
-        'values': [1, 2, 3, 4, 5],
-        'labels': ["Mexican", "Hispanic", "White", "Black", "Other"]
-    },
-    'drink': {
-        'values': [1, 2],
-        'labels': ["No", "Yes"]
-    },
-    'sleep': {
-        'values': [1, 2],
-        'labels': ["Problem", "Normal"]
-    },
-    'Hypertension': {
-        'values': [1, 2],
-        'labels': ["No", "Yes"]
-    },
-    'Dyslipidemia': {
-        'values': [1, 2],
-        'labels': ["No", "Yes"]
-    }
-}
-
-# 特征顺序
-feature_names = [
-    'smoker', 'sex', 'carace', 'drink', 'sleep',
-    'Hypertension', 'Dyslipidemia', 'HHR', 'RIDAGEYR',
-    'INDFMPIR', 'BMXBMI', 'LBXWBCSI', 'LBXRBCSI'
-]
-
-# 加载资源和数据
+# 加载R模型
 @st.cache_resource
-def load_resources():
-    # 加载R模型
+def load_r_model():
     r_model = robjects.r['readRDS']('knn_model.rds')
     
     # 动态修补Pandas兼容性
@@ -63,68 +23,23 @@ def load_resources():
         
     return r_model
 
+r_model = load_r_model()
+
+# 加载数据
 @st.cache_data
 def load_data():
     dev = pd.read_csv('dev.csv')
     vad = pd.read_csv('vad.csv')
     return dev, vad
 
-r_model = load_resources()
 dev, vad = load_data()
 
-# 数据转换函数（关键修复）
-def convert_to_r_factors(input_df):
-    """将数据转换为R兼容格式"""
-    r_data = {}
-    for col in input_df.columns:
-        # 处理分类变量
-        if col in CATEGORICAL_MAP:
-            values = input_df[col].astype(int).tolist()
-            levels = robjects.IntVector(CATEGORICAL_MAP[col]['values'])
-            r_data[col] = robjects.FactorVector(
-                robjects.IntVector(values),
-                levels=levels
-            )
-        # 处理数值变量
-        else:
-            values = input_df[col].astype(float).tolist()
-            r_data[col] = robjects.FloatVector(values)
-    return robjects.DataFrame(r_data)
-
-# 预测函数（关键修复）
-def r_predict(input_df):
-    try:
-        # 执行类型转换
-        input_df = input_df.astype({
-            col: 'int64' if col in CATEGORICAL_MAP else 'float64'
-        })
-        
-        # 转换为R数据格式
-        with localconverter(robjects.default_converter + pandas2ri.converter):
-            r_data = convert_to_r_factors(input_df)
-            
-            # 调试输出R数据结构
-            st.write("R数据结构摘要：")
-            st.code(robjects.r['capture.output'](robjects.r['str'](r_data)))
-            
-            # 执行预测
-            r_pred = robjects.r['predict'](
-                r_model, 
-                newdata=r_data,
-                type="prob"
-            )
-            
-            # 转换预测结果
-            pred_df = pd.DataFrame(
-                np.array(r_pred),
-                columns=['No', 'Yes']
-            )
-            
-        return pred_df['Yes'].values
-    
-    except Exception as e:
-        st.error(f"预测过程详细错误：\n{str(e)}")
-        raise RuntimeError("预测失败")
+# 定义特征顺序（根据实际数据调整）
+feature_names = [
+    'smoker', 'sex', 'carace', 'drink', 'sleep',
+    'Hypertension', 'Dyslipidemia', 'HHR', 'RIDAGEYR',
+    'INDFMPIR', 'BMXBMI', 'LBXWBCSI', 'LBXRBCSI'
+]
 
 # Streamlit界面
 st.title("Co-occurrence Risk Predictor (R Model)")
@@ -134,125 +49,108 @@ with st.form("input_form"):
     col1, col2 = st.columns(2)
     
     with col1:
-        smoker = st.selectbox("Smoker:", 
-                            CATEGORICAL_MAP['smoker']['values'],
-                            format_func=lambda x: CATEGORICAL_MAP['smoker']['labels'][x-1])
-        sex = st.selectbox("Sex:", 
-                         CATEGORICAL_MAP['sex']['values'],
-                         format_func=lambda x: CATEGORICAL_MAP['sex']['labels'][x-1])
-        carace = st.selectbox("Race:",
-                            CATEGORICAL_MAP['carace']['values'],
-                            format_func=lambda x: CATEGORICAL_MAP['carace']['labels'][x-1])
-        drink = st.selectbox("Alcohol:",
-                           CATEGORICAL_MAP['drink']['values'],
-                           format_func=lambda x: CATEGORICAL_MAP['drink']['labels'][x-1])
-        sleep = st.selectbox("Sleep:",
-                           CATEGORICAL_MAP['sleep']['values'],
-                           format_func=lambda x: CATEGORICAL_MAP['sleep']['labels'][x-1])
+        smoker = st.selectbox("Smoker:", [1,2,3], 
+                            format_func=lambda x: "Never" if x==1 else "Former" if x==2 else "Current")
+        sex = st.selectbox("Sex:", [1,2], format_func=lambda x: "Female" if x==1 else "Male")
+        carace = st.selectbox("Race:", [1,2,3,4,5], 
+                            format_func=lambda x: ["Mexican","Hispanic","White","Black","Other"][x-1])
+        drink = st.selectbox("Alcohol:", [1,2], format_func=lambda x: "No" if x==1 else "Yes")
+        sleep = st.selectbox("Sleep:", [1,2], format_func=lambda x: "Problem" if x==1 else "Normal")
         
     with col2:
-        Hypertension = st.selectbox("Hypertension:",
-                                  CATEGORICAL_MAP['Hypertension']['values'],
-                                  format_func=lambda x: CATEGORICAL_MAP['Hypertension']['labels'][x-1])
-        Dyslipidemia = st.selectbox("Dyslipidemia:",
-                                  CATEGORICAL_MAP['Dyslipidemia']['values'],
-                                  format_func=lambda x: CATEGORICAL_MAP['Dyslipidemia']['labels'][x-1])
-        HHR = st.number_input("HHR Ratio:", min_value=0.2, max_value=1.7, value=1.0, step=0.1)
+        Hypertension = st.selectbox("Hypertension:", [1,2], format_func=lambda x: "No" if x==1 else "Yes")
+        Dyslipidemia = st.selectbox("Dyslipidemia:", [1,2], format_func=lambda x: "No" if x==1 else "Yes")
+        HHR = st.number_input("HHR Ratio:", min_value=0.2, max_value=1.7, value=1.0)
         RIDAGEYR = st.number_input("Age:", min_value=20, max_value=80, value=50)
-        INDFMPIR = st.number_input("Poverty Ratio:", min_value=0.0, max_value=5.0, value=2.0, step=0.1)
-        BMXBMI = st.number_input("BMI:", min_value=15.0, max_value=60.0, value=25.0, step=0.1)
-        LBXWBCSI = st.number_input("WBC:", min_value=2.0, max_value=20.0, value=6.0, step=0.1)
-        LBXRBCSI = st.number_input("RBC:", min_value=2.5, max_value=7.0, value=4.0, step=0.1)
+        INDFMPIR = st.number_input("Poverty Ratio:", min_value=0.0, max_value=5.0, value=2.0)
+        BMXBMI = st.number_input("BMI:", min_value=15.0, max_value=60.0, value=25.0)
+        LBXWBCSI = st.number_input("WBC:", min_value=2.0, max_value=20.0, value=6.0)
+        LBXRBCSI = st.number_input("RBC:", min_value=2.5, max_value=7.0, value=4.0)
 
     submitted = st.form_submit_button("Predict")
 
-if submitted:
-    # 构建输入数据（带类型强制转换）
-    input_data = {
-        'smoker': int(smoker),
-        'sex': int(sex),
-        'carace': int(carace),
-        'drink': int(drink),
-        'sleep': int(sleep),
-        'Hypertension': int(Hypertension),
-        'Dyslipidemia': int(Dyslipidemia),
-        'HHR': float(HHR),
-        'RIDAGEYR': int(RIDAGEYR),
-        'INDFMPIR': float(INDFMPIR),
-        'BMXBMI': float(BMXBMI),
-        'LBXWBCSI': float(LBXWBCSI),
-        'LBXRBCSI': float(LBXRBCSI)
-    }
+# 预测函数
+def r_predict(input_df):
+    with localconverter(robjects.default_converter + pandas2ri.converter):
+        r_data = robjects.conversion.py2rpy(input_df)
     
+    r_pred = robjects.r['predict'](
+        r_model, 
+        newdata=r_data,
+        type="prob"
+    )
+    
+    # 获取 'probability(1)' 和 'probability(0)' 数据
+    prob_1 = r_pred.rx2('probability.1')[0]
+    prob_0 = r_pred.rx2('probability.0')[0]
+    
+    return prob_1, prob_0  # 返回阳性类和阴性类的概率
+
+if submitted:
+    # 构建输入数据
+    input_data = [
+        smoker, sex, carace, drink, sleep,
+        Hypertension, Dyslipidemia, HHR, RIDAGEYR,
+        INDFMPIR, BMXBMI, LBXWBCSI, LBXRBCSI
+    ]
     input_df = pd.DataFrame([input_data], columns=feature_names)
     
     try:
         # 执行预测
-        prob_1 = r_predict(input_df)[0]
-        predicted_class = 1 if prob_1 > 0.56 else 0
+        prob_1, prob_0 = r_predict(input_df)
+        predicted_class = 1 if prob_1 > 0.56 else 0  # 用阈值判断类别
         
         # 显示结果
         st.success("### Prediction Results")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("High Risk Probability", f"{prob_1*100:.1f}%")
-        with col2:
-            st.metric("Recommended Action", 
-                      "Immediate Intervention" if predicted_class else "Routine Monitoring")
-
+        st.metric("Comorbidity Risk", f"{prob_1*100:.1f}%", 
+                help="Probability of having both conditions")
+        
         # 生成建议
-        advice = """
-        **Clinical Recommendations:**
-        - Monthly cardiovascular screening
-        - Daily blood pressure monitoring
-        - Mediterranean diet plan
-        - 150 mins/week moderate exercise
+        advice_template = """
+        **Recommendations:**
+        - Regular cardiovascular screening
+        - Monitor blood pressure weekly
+        - Mediterranean diet recommended
         {}"""
-        st.info(advice.format("**▲ High Risk: Consult specialist immediately**" 
-                            if predicted_class else "**▼ Low Risk: Maintain current lifestyle**"))
+        st.info(advice_template.format("Immediate consultation needed!" if predicted_class==1 else "Maintain healthy lifestyle"))
 
         # SHAP解释
-        st.subheader("SHAP Feature Impact")
-        with st.spinner('Generating explanation...'):
-            background = shap.sample(vad[feature_names], 100)
-            
-            def shap_predict(data):
-                return np.column_stack([
-                    1 - r_predict(pd.DataFrame(data, columns=feature_names)),
-                    r_predict(pd.DataFrame(data, columns=feature_names))
-                ])
-
-            explainer = shap.KernelExplainer(shap_predict, background)
-            shap_values = explainer.shap_values(input_df, nsamples=50)
-            
-            fig, ax = plt.subplots()
-            shap.summary_plot(shap_values[1], input_df, plot_type='bar', show=False)
-            st.pyplot(fig)
-
+        st.subheader("Model Interpretation")
+        
+        # 准备解释数据
+        background = shap.sample(vad[feature_names], 100)
+        
+        # 定义SHAP预测函数
+        def shap_predict(data):
+            input_df = pd.DataFrame(data, columns=feature_names)
+            return np.column_stack([1-r_predict(input_df)[0], r_predict(input_df)[0]])  # 调整为返回两个类的概率
+        
+        # 创建解释器
+        explainer = shap.KernelExplainer(shap_predict, background)
+        shap_values = explainer.shap_values(input_df, nsamples=100)
+        
+        # 可视化
+        st.subheader("Feature Impact")
+        fig, ax = plt.subplots()
+        shap.force_plot(explainer.expected_value[1], 
+                       shap_values[0][:,1], 
+                       input_df.iloc[0],
+                       matplotlib=True,
+                       show=False)
+        st.pyplot(fig)
+        
         # LIME解释
-        st.subheader("LIME Explanation")
-        with st.spinner('Analyzing local features...'):
-            def lime_predict(x):
-                return np.column_stack([
-                    1 - r_predict(pd.DataFrame(x, columns=feature_names)),
-                    r_predict(pd.DataFrame(x, columns=feature_names))
-                ])
-
-            lime_explainer = LimeTabularExplainer(
-                dev[feature_names].values,
-                feature_names=feature_names,
-                class_names=['Low Risk', 'High Risk'],
-                mode='classification'
-            )
-
-            exp = lime_explainer.explain_instance(
-                input_df.values[0], 
-                lime_predict,
-                num_features=8
-            )
-            
-            st.components.v1.html(exp.as_html(), height=800)
+        lime_exp = LimeTabularExplainer(
+            background.values,
+            feature_names=feature_names,
+            class_names=['Low Risk','High Risk'],
+            mode='classification'
+        ).explain_instance(input_df.values[0], 
+                           lambda x: np.column_stack([1-r_predict(pd.DataFrame(x, columns=feature_names))[0],
+                                                      r_predict(pd.DataFrame(x, columns=feature_names))[0]]))
+        
+        st.components.v1.html(lime_exp.as_html(), height=800)
 
     except Exception as e:
-        st.error(f"系统错误：{str(e)}")
+        st.error(f"Prediction Error: {str(e)}")
         st.stop()
