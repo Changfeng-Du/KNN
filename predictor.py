@@ -93,19 +93,19 @@ def predict_from_probabilities(input_data, probability_data):
 
 if submitted:
   # 构建输入数据
-input_data = [
-    smoker, sex, carace, drink, sleep,
-    Hypertension, Dyslipidemia, HHR, RIDAGEYR,
-    INDFMPIR, BMXBMI, LBXWBCSI, LBXRBCSI
-]
-
-input_df = pd.DataFrame([input_data])
-
-# 确保列名正确
-input_df.columns = feature_names  # 确保列名与特征顺序一致
-
-# 检查列名是否正确
-st.write(input_df.columns)  # 打印列名以调试
+    input_data = [
+        smoker, sex, carace, drink, sleep,
+        Hypertension, Dyslipidemia, HHR, RIDAGEYR,
+        INDFMPIR, BMXBMI, LBXWBCSI, LBXRBCSI
+    ]
+    
+    input_df = pd.DataFrame([input_data])
+    
+    # 确保列名正确
+    input_df.columns = feature_names  # 确保列名与特征顺序一致
+    
+    # 检查列名是否正确
+    st.write(input_df.columns)  # 打印列名以调试
 
 # 进行预测
 try:
