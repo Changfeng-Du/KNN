@@ -93,11 +93,15 @@ def predict_from_probabilities(input_data, probability_data):
 
 if submitted:
     # 构建输入数据
-    input_data = [
-        smoker, sex, carace, drink, sleep,
-        Hypertension, Dyslipidemia, HHR, RIDAGEYR,
-        INDFMPIR, BMXBMI, LBXWBCSI, LBXRBCSI
-    ]
+   input_data = [
+    smoker, sex, carace, drink, sleep,
+    Hypertension, Dyslipidemia, HHR, RIDAGEYR,
+    INDFMPIR, BMXBMI, LBXWBCSI, LBXRBCSI
+]
+input_df = pd.DataFrame([input_data])
+
+# 这里为 DataFrame 设置正确的列名
+input_df.columns = feature_names
     
     # 进行预测
     try:
